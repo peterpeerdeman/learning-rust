@@ -1,6 +1,11 @@
+use std::cell::Cell;
+use std::cell::RefCell;
 use std::collections::VecDeque;
 use std::fmt::*;
 use std::mem;
+use std::result::Result;
+use std::sync::Arc;
+use std::sync::Mutex;
 
 fn types() -> char {
     let value: u8 = 61;
@@ -206,22 +211,20 @@ fn option_and_handling() {
     println!("unwrapping or else, returning fallback: {}", number);
 }
 
-/*
 fn result_and_handling() {
     fn divide(numerator: f64, denominator: f64) -> Result<f64, String> {
         if denominator == 0.0 {
-            Result::Err("division by zero".to_string())
+            Err("het gaat fout".to_string())
         } else {
-            Result::Ok(numerator / denominator)
+            Ok(numerator / denominator)
         }
     }
 
-    match divide(4, 0) {
+    match divide(4.0, 0.0) {
         Ok(_) => println!("it was ok"),
         Err(e) => println!("it was an error {}", e),
     }
 }
-*/
 
 fn vecdeq() {
     let mut vecdeq = VecDeque::from(vec![0, 1, 2]);
@@ -270,24 +273,17 @@ fn closures() {
     let closure = |inside: i32| outside + inside;
     println!("calling closure {:?}", closure(5));
 
-    let num_vec = vec![2,4,6];
-    let double_vec = &num_vec
-        .iter()
-        .map(|x| x*2)
-        .collect::<Vec<i32>>();
+    let num_vec = vec![2, 4, 6];
+    let double_vec = &num_vec.iter().map(|x| x * 2).collect::<Vec<i32>>();
 
     println!("mapped vector{:?}", double_vec);
 
-    num_vec
-        .iter()
-        .enumerate()
-        .for_each(|(index, value)| { 
-            println!("{}:{}",index,value); 
-        })
+    num_vec.iter().enumerate().for_each(|(index, value)| {
+        println!("{}:{}", index, value);
+    });
 }
 
 fn functional() {
-
     #[derive(Debug)]
     struct Measurement {
         date: &'static str,
@@ -305,13 +301,14 @@ fn functional() {
             if !value.is_ok() {
                 return None;
             }
-            Some(
-                Self {
-                    measurement: parts[1],
-                    date: parts[0],
-                    value: value.unwrap()
-                }
-            )
+            Some(Self {
+                measurement: parts[1],
+                date: parts[0],
+                value: value.unwrap(),
+            })
+        }
+        fn print(&self) {
+            println!("{}, {}, {}", self.date, self.measurement, self.value,);
         }
     }
 
@@ -329,9 +326,149 @@ fn functional() {
         .iter()
         .filter_map(|line| Measurement::new(line))
         .collect::<Vec<Measurement>>();
-    println!("{:?}", measurements)
+    println!("{:?}", measurements);
+    measurements[0].print();
+}
 
+fn some_and_find() {
+    let some_are_none = vec![Some("yes"), Some("yes"), None];
+    let result1 = some_are_none.iter().all(|x| x.is_some());
 
+    let result2 = some_are_none.iter().any(|x| x.is_some());
+
+    println!("all are some: {}", result1);
+    println!("some are some: {}", result2);
+
+    let some_are_none = vec![Some(1), Some(1), None];
+    let folded_total = some_are_none
+        .iter()
+        .fold(0, |total_so_far, next| total_so_far + next.unwrap_or(0));
+    println!("folded total: {}", folded_total);
+
+    let found_item = some_are_none
+        .iter()
+        .rev() //start at the end
+        .find(|item| {
+            return item.unwrap_or(0) == 1;
+        });
+    println!("found item: {}", found_item.unwrap().unwrap());
+}
+
+fn cycle() {
+    let even_odd = vec!["even", "odd"];
+
+    let even_odd_vec = (0..6)
+        .zip(even_odd.into_iter().cycle())
+        .collect::<Vec<(i32, &str)>>();
+    println!("{:?}", even_odd_vec);
+}
+
+fn debug_logging() {
+    let number = 5;
+    dbg!(number);
+}
+
+fn lifetimes() {
+    #[derive(Debug)]
+    struct City<'a> {
+        name: &'a String,
+        population: u32,
+    }
+
+    impl City<'_> {
+        fn grow(&mut self) {
+            self.population = self.population * 2;
+        }
+    }
+
+    let cities = vec!["Purmerend".to_string(), "Amsterdam".to_string()];
+
+    let mut my_city = City {
+        name: &cities[0],
+        population: 1800,
+    };
+
+    dbg!(my_city.name);
+    dbg!(my_city.population);
+    my_city.grow();
+    dbg!(my_city.population);
+}
+
+fn cell_refcel() {
+    #[derive(Debug)]
+    struct Phone {
+        name: &'static str,
+        weight_gram: u32,
+        on_sale: Cell<bool>,
+        bought_by_customer_id: RefCell<u32>,
+    }
+
+    let nokia_3330 = Phone {
+        name: "Nokia 3310",
+        weight_gram: 400,
+        on_sale: Cell::new(false),
+        bought_by_customer_id: RefCell::new(0),
+    };
+
+    dbg!(&nokia_3330.on_sale);
+    nokia_3330.on_sale.set(true);
+    dbg!(&nokia_3330.on_sale);
+    dbg!(&nokia_3330.bought_by_customer_id);
+    nokia_3330.bought_by_customer_id.replace(101332);
+    dbg!(&nokia_3330.bought_by_customer_id);
+
+    let borrowed_bought_value = nokia_3330.bought_by_customer_id.borrow_mut();
+    //let borrowed_bought_value2 = nokia_3330.bought_by_customer_id.borrow_mut(); //this would panic runtime
+    dbg!(borrowed_bought_value);
+}
+
+fn mutex() {
+    let my_mutex = Mutex::new(5);
+    let mut mutex_changer = my_mutex.lock().unwrap();
+    println!("{:?}", my_mutex);
+    println!("{:?}", mutex_changer);
+    *mutex_changer = 6;
+    println!("{:?}", mutex_changer);
+
+    let mut second_mut_changer = my_mutex.try_lock();
+    if let Ok(value) = &second_mut_changer {
+        dbg!(value);
+    } else {
+        dbg!("I didn't get the (second) lock");
+    };
+    std::mem::drop(mutex_changer);
+
+    // immediately change without variable
+    *my_mutex.lock().unwrap() = 7;
+    println!("{:?}", my_mutex);
+
+    *my_mutex.lock().unwrap() = 10;
+    println!("{:?}", my_mutex);
+}
+
+fn multithreading() {
+    let my_number = Arc::new(Mutex::new(0));
+
+    let my_number1 = Arc::clone(&my_number);
+    let my_number2 = Arc::clone(&my_number);
+
+    let thread_one = std::thread::spawn(move || {
+        for i in 0..10 {
+            *my_number1.lock().unwrap() += 1;
+            println!("printing thread 1 iteration {}: {:?}", i, my_number1);
+        }
+    });
+
+    let thread_two = std::thread::spawn(move || {
+        for i in 0..10 {
+            *my_number2.lock().unwrap() += 1;
+            println!("printing thread 2 iteration {}: {:?}", i, my_number2);
+        }
+    });
+
+    thread_one.join().unwrap();
+    thread_two.join().unwrap();
+    println!("done multithreading");
 }
 
 fn main() {
@@ -345,11 +482,18 @@ fn main() {
     looping_and_matching();
     structs_enums_and_impl();
     option_and_handling();
-    //result_and_handling();
+    result_and_handling();
     vecdeq();
     traitbounds();
     chaining();
     iterators();
     closures();
     functional();
+    some_and_find();
+    cycle();
+    debug_logging();
+    lifetimes();
+    cell_refcel();
+    mutex();
+    multithreading();
 }
