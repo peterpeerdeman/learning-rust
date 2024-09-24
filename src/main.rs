@@ -1,6 +1,8 @@
+use std::any::Any;
 use std::cell::Cell;
 use std::cell::RefCell;
 use std::collections::VecDeque;
+use std::fmt;
 use std::fmt::*;
 use std::mem;
 use std::result::Result;
@@ -44,7 +46,15 @@ fn string_factory() -> String {
     large // can return the object, passing the ownership to caller
 }
 
-fn references() -> String {
+fn references() {
+    let value = 7;
+    let reference = &7;
+
+    //println!("value and reference equality: {}", value == reference);
+    println!("value and dereferenced equality: {}", value == *reference);
+}
+
+fn moving_references() -> String {
     let mut string_object_created_in_method = string_factory();
     string_object_created_in_method.push('?'); //
     println!("mutated string {}", string_object_created_in_method);
@@ -446,7 +456,7 @@ fn mutex() {
     println!("{:?}", my_mutex);
 }
 
-fn multithreading() {
+fn multithreading_naive() {
     let my_number = Arc::new(Mutex::new(0));
 
     let my_number1 = Arc::clone(&my_number);
@@ -468,7 +478,254 @@ fn multithreading() {
 
     thread_one.join().unwrap();
     thread_two.join().unwrap();
-    println!("done multithreading");
+    println!("done multithreading_naive");
+}
+
+fn multithreading() {
+    let my_number = Arc::new(Mutex::new(0));
+    let mut join_handle_vec = vec![];
+
+    for thread in 0..2 {
+        let my_number_clone = Arc::clone(&my_number);
+        let handle = std::thread::spawn(move || {
+            for i in 0..10 {
+                *my_number_clone.lock().unwrap() += 1;
+                println!(
+                    "printing thread {} iteration {}: {:?}",
+                    thread, i, my_number_clone
+                );
+            }
+        });
+        join_handle_vec.push(handle);
+    }
+
+    join_handle_vec.into_iter().for_each(|handle| {
+        handle.join().unwrap();
+    });
+    println!("{:?}", my_number);
+    println!("done multithreading_naive");
+}
+
+fn channels() {
+    use std::sync::mpsc::channel;
+    let (sender, receiver) = channel();
+
+    let sender_clone = sender.clone();
+
+    let mut handlers = vec![];
+
+    let handle1 = std::thread::spawn(move || {
+        sender.send("Send a &str").unwrap();
+    });
+
+    let handle2 = std::thread::spawn(move || {
+        sender_clone.send("Send another &str").unwrap();
+    });
+
+    handlers.push(handle1);
+    handlers.push(handle2);
+
+    for _ in handlers {
+        // still prints in random order, depending on which thread finishes first
+        println!("{:?}", receiver.recv().unwrap());
+    }
+}
+
+fn big_multithreading() {
+    use std::sync::mpsc::channel;
+    use std::thread::spawn;
+
+    const TOTAL: i32 = 1_000_000;
+    const THREADS: i32 = 10;
+    let per_thread = TOTAL / THREADS;
+
+    let (sender, receiver) = channel();
+    let big_vec = vec![0; TOTAL as usize];
+    let mut result = vec![];
+    let mut handlers = vec![];
+
+    for i in 0..THREADS {
+        let sender_clone = sender.clone();
+        let mut work: Vec<u8> = Vec::with_capacity(per_thread as usize);
+        let start = (i * per_thread) as usize;
+        let end = ((i + 1) * per_thread) as usize;
+        work.extend(&big_vec[start..end]);
+        let handle = spawn(move || {
+            for number in work.iter_mut() {
+                *number += 1;
+            }
+            sender_clone.send(work).unwrap();
+        });
+        handlers.push(handle);
+    }
+    drop(sender);
+
+    for handle in handlers {
+        handle.join().unwrap();
+    }
+
+    while let Ok(results) = receiver.try_recv() {
+        result.push(results);
+    }
+
+    let flattened_result = result.into_iter().flatten().collect::<Vec<u8>>();
+
+    println!(
+        "big work result length: {}, range {:?}",
+        flattened_result.len(),
+        &flattened_result[1_000..1_100]
+    );
+}
+
+fn box_heap() {
+    #[derive(Debug)]
+    struct LargeStruct {
+        data: [u8; 1_000_000],
+    }
+
+    let large_object = Box::new(LargeStruct {
+        data: [0; 1_000_000],
+    });
+    println!("{:?}", large_object.type_id());
+}
+
+fn dyn_trait() {
+    trait JustATrait: fmt::Debug {}
+
+    enum EnumOfNumbers {
+        I8(i8),
+        AnotherI8(i8),
+        OneMoreI8(i8),
+    }
+    impl JustATrait for EnumOfNumbers {}
+
+    impl fmt::Debug for EnumOfNumbers {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            match self {
+                EnumOfNumbers::I8(value) => write!(f, "I8({})", value),
+                EnumOfNumbers::AnotherI8(value) => write!(f, "AnotherI8({})", value),
+                EnumOfNumbers::OneMoreI8(value) => write!(f, "OneMoreI8({})", value),
+            }
+        }
+    }
+
+    fn returns_a_trait() -> Box<dyn JustATrait> {
+        let some_enum = EnumOfNumbers::I8(8);
+        Box::new(some_enum)
+    }
+
+    let my_trait = returns_a_trait();
+    println!("formatted trait with dyn {:?}", my_trait)
+}
+
+fn dereferencing() {
+    use std::ops::Deref;
+
+    struct HoldsAnumber(u8);
+    impl Deref for HoldsAnumber {
+        type Target = u8;
+
+        fn deref(&self) -> &Self::Target {
+            &self.0
+        }
+    }
+
+    let my_number = HoldsAnumber(10);
+    println!("dereferencing my own struct: {}", *my_number + 20)
+}
+
+mod print_things {
+    #[derive(Debug)]
+    pub struct PrintThings {
+        pub first: u8,
+        second: u8,
+        third: u8,
+    }
+    impl PrintThings {
+        pub fn create(i: u8) -> Self {
+            Self {
+                first: i,
+                second: 2,
+                third: 3,
+            }
+        }
+        pub fn prints_one_thing<T: std::fmt::Display>(input: T) {
+            println!("{}", input)
+        }
+    }
+
+    impl std::fmt::Display for PrintThings {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(f, "{}, {}, {}", self.first, self.second, self.third)
+        }
+    }
+}
+
+fn mods() {
+    use crate::print_things::PrintThings;
+    PrintThings::prints_one_thing(6);
+    let my_struct = PrintThings::create(10);
+    PrintThings::prints_one_thing(&my_struct);
+    println!("custom displayed struct {}", my_struct);
+}
+
+fn rayon() {
+    use rayon::prelude::*;
+    use std::time::Instant;
+    const TOTAL_ITEMS: usize = 1_200_000;
+
+    let mut my_vec = vec![0; TOTAL_ITEMS];
+    let before1 = Instant::now();
+    my_vec
+        .iter_mut()
+        .enumerate()
+        .for_each(|(index, number)| *number+=index+1);
+    println!("no rayon: {}ms {:?}", before1.elapsed().as_millis(), &my_vec[5000..5005]);
+
+    let mut my_vec = vec![0; TOTAL_ITEMS];
+    let before2 = Instant::now();
+    my_vec
+        .par_iter_mut()
+        .enumerate()
+        .for_each(|(index, number)| *number+=index+1);
+    println!("rayon: {}ms {:?}", before2.elapsed().as_millis(), &my_vec[5000..5005]);
+}
+
+fn serde() {
+    use serde::{Serialize, Deserialize};
+
+    #[derive(Serialize, Deserialize, Debug)]
+    struct Point {
+        x: u8,
+        y: u8
+    }
+    let point = Point{x: 1, y:2};
+    println!("serde_json::to_string {}", serde_json::to_string(&point).unwrap());
+
+}
+
+async fn future_blocks() {
+    use std::time::Duration;
+    let future_1 = async {
+        std::thread::sleep(Duration::from_millis(15));
+        println!("async from 1")
+    };
+
+    let future_2 = async {
+        std::thread::sleep(Duration::from_millis(5));
+        println!("async from 2")
+    };
+
+    ((), ()) = futures::join!(future_1, future_2)
+}
+
+fn futures() {
+    let future = future_blocks();
+    futures::executor::block_on(future);
+}
+
+fn tokio() {
+    todo!("implement")
 }
 
 fn main() {
@@ -476,6 +733,7 @@ fn main() {
     types();
     byte_manipulation();
     references();
+    moving_references();
     unicode();
     arrays();
     vectors_and_tuples();
@@ -495,5 +753,38 @@ fn main() {
     lifetimes();
     cell_refcel();
     mutex();
+    multithreading_naive();
     multithreading();
+    channels();
+    big_multithreading();
+    box_heap();
+    dyn_trait();
+    dereferencing();
+    mods();
+    rayon();
+    serde();
+    futures();
+    tokio();
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn types_returns_char() {
+        let result = types();
+        assert_eq!(result, '=');
+    }
+
+    #[test]
+    fn mutability_returns_integer() {
+        let result = mutability();
+        assert_eq!(result, 1_000_035);
+    }
+
+    #[test]
+    fn string_factory_returns_string() {
+        let result = string_factory();
+        assert_eq!(result.len(), 48);
+    }
 }
