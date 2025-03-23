@@ -8,6 +8,7 @@ use std::mem;
 use std::result::Result;
 use std::sync::Arc;
 use std::sync::Mutex;
+use tokio::runtime::Runtime;
 
 fn types() -> char {
     let value: u8 = 61;
@@ -272,7 +273,7 @@ fn iterators() {
     let vector_b = vector.iter().map(|x| x * x).collect::<Vec<i32>>();
 
     let mut vector_mut = vector.clone();
-    vector_mut.iter_mut().for_each(|x| *x = *x + 100);
+    vector_mut.iter_mut().for_each(|x| *x += 1000);
     println!("{:?}", vector_a);
     println!("{:?}", vector_b);
     println!("{:?}", vector);
@@ -440,7 +441,7 @@ fn mutex() {
     *mutex_changer = 6;
     println!("{:?}", mutex_changer);
 
-    let mut second_mut_changer = my_mutex.try_lock();
+    let second_mut_changer = my_mutex.try_lock();
     if let Ok(value) = &second_mut_changer {
         dbg!(value);
     } else {
@@ -724,8 +725,13 @@ fn futures() {
     futures::executor::block_on(future);
 }
 
+async fn tokio_downloader() {
+
+}
+
 fn tokio() {
-    todo!("implement")
+    let rt = Runtime::new().unwrap();
+    rt.block_on(tokio_downloader());
 }
 
 fn main() {
